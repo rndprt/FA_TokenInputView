@@ -11,14 +11,24 @@ import Foundation
 @objc public protocol FA_TokenInputViewDelegate: class {
   
   /**
-   *  Called when the text field is tapped
+   *  Called to check whether a token can be selected
    */
-  @objc optional func tokenInputViewWasClicked(_ view: FA_TokenInputView, token: FA_Token)
+  @objc optional func tokenInputView(_ view: FA_TokenInputView, canSelect token: FA_Token) -> Bool
   
+  /**
+   *  Called when a token is selected
+   */
+  @objc optional func tokenInputView(_ view: FA_TokenInputView, didSelect token: FA_Token)
+  
+  /**
+   *  Called when a token is tapped
+   */
+  @objc optional func tokenInputView(_ view: FA_TokenInputView, didTap token: FA_Token)
+
   /**
    *  Called when the text field begins editing
    */
-  @objc optional func tokenInputViewDidEnditing(_ view: FA_TokenInputView)
+  @objc optional func tokenInputViewDidEndEditing(_ view: FA_TokenInputView)
   
   /**
    *  Called when the text field ends editing
@@ -28,31 +38,31 @@ import Foundation
   /**
    * Called when the text field text has changed. You should update your autocompleting UI based on the text supplied.
    */
-  @objc optional func tokenInputViewDidChangeText(_ view: FA_TokenInputView, text theNewText: String)
+  @objc optional func tokenInputView(_ view: FA_TokenInputView, didChangeText text: String?)
   
   /**
    * Called when a token has been added. You should use this opportunity to update your local list of selected items.
    */
-  @objc optional func tokenInputViewDidAddToken(_ view: FA_TokenInputView, token theNewToken: FA_Token)
+  @objc optional func tokenInputView(_ tokenView: FA_TokenInputView, didAdd token: FA_Token)
   
   /**
    * Called when a token has been removed. You should use this opportunity to update your local list of selected items.
    */
-  @objc optional func tokenInputViewDidRemoveToken(_ view: FA_TokenInputView, token removedToken: FA_Token)
+  @objc optional func tokenInputView(_ tokenView: FA_TokenInputView, didRemove token: FA_Token)
   
   /**
    * Called when the user attempts to press the Return key with text partially typed.
    * @return A CLToken for a match (typically the first item in the matching results),
    * or nil if the text shouldn't be accepted.
    */
-  @objc optional func tokenInputViewTokenForText(_ view: FA_TokenInputView, text searchToken: String) -> FA_Token?
+  @objc optional func tokenInputView(_ view: FA_TokenInputView, tokenForText text: String) -> FA_Token?
   
   /**
    * Called when the view has updated its own height. If you are
    * not using Autolayout, you should use this method to update the
    * frames to make sure the token view still fits.
    */
-  @objc optional func tokenInputViewDidChangeHeight(_ view: FA_TokenInputView,  height newHeight:CGFloat)
+  @objc optional func tokenInputView(_ view: FA_TokenInputView, didChangeHeightTo height: CGFloat)
   
   /**
    * Called when the view has received a double tap gesture. If you want to display a menu above
@@ -69,6 +79,28 @@ import Foundation
    *
    * @return the array of `UIMenuItem`
    */
+  @objc optional func tokenInputView(_ view: FA_TokenInputView, menuItemsFor token: FA_Token) -> [UIMenuItem]
+  
+  //MARK: Deprecations
+  @available(*, unavailable, renamed: "tokenInputView(_:didTap:)")
+  @objc optional func tokenInputViewWasClicked(_ view: FA_TokenInputView, token: FA_Token)
+  
+  @available(*, unavailable, renamed: "tokenInputView(_:didChangeText:)")
+  @objc optional func tokenInputViewDidChangeText(_ view: FA_TokenInputView, text theNewText: String)
+  
+  @available(*, unavailable, renamed: "tokenInputView(_:didAdd:)")
+  @objc optional func tokenInputViewDidAddToken(_ view: FA_TokenInputView, token theNewToken: FA_Token)
+  
+  @available(*, unavailable, renamed: "tokenInputView(_:didRemove:)")
+  @objc optional func tokenInputViewDidRemoveToken(_ view: FA_TokenInputView, token removedToken: FA_Token)
+  
+  @available(*, unavailable, renamed: "tokenInputView(_:didChangeText:)")
+  @objc optional func tokenInputViewTokenForText(_ view: FA_TokenInputView, text searchToken: String) -> FA_Token?
+  
+  @available(*, unavailable, renamed: "tokenInputView(_:didChangeHeightTo:)")
+  @objc optional func tokenInputViewDidChangeHeight(_ view: FA_TokenInputView,  height newHeight:CGFloat)
+  
+  @available(*, unavailable, renamed: "tokenInputView(_:menuItemsFor:)")
   @objc optional func tokenInputViewMenuItems(_ view: FA_TokenInputView, token: FA_Token) -> [UIMenuItem]
 }
 
@@ -105,12 +137,14 @@ open class FA_TokenInputView: UIView {
   }
   
   var tokenizeOnEndEditing = true
+  open var tokenizationCharacters : Set<String> = [","]
   
   open var font: UIFont! {
     didSet {
       self.textField?.font = self.font
       for view in tokenViews {
         view.font = self.font
+        view.sizeToFit()
       }
     }
   }
@@ -132,32 +166,49 @@ open class FA_TokenInputView: UIView {
   fileprivate var textField: FA_BackspaceDetectingTextField!
   fileprivate var fieldLabel: UILabel!
   fileprivate var intrinsicContentHeight: CGFloat!
-  fileprivate var displayMode: FA_TokenInputViewMode!
+  fileprivate var displayMode: FA_TokenInputViewMode = .edit
   fileprivate var heightZeroConstraint: NSLayoutConstraint!
   
-  fileprivate var textColor: UIColor!
-  fileprivate var selectedTextColor: UIColor!
-  fileprivate var selectedBackgroundColor: UIColor!
-  fileprivate var separatorColor: UIColor!
+  fileprivate var textColor: UIColor?
+  fileprivate var selectedTextColor: UIColor?
+  fileprivate var selectedBackgroundColor: UIColor?
+  fileprivate var separatorColor: UIColor = UIColor.white
+  
+  open var editable: Bool = true {
+    didSet {
+      displayMode = editable ? .edit : .view
+      tokenViews.forEach { $0.displayMode = displayMode }
+    }
+  }
   
   open var HSPACE: CGFloat = 0.0
-  open var TEXT_FIELD_HSPACE: CGFloat = 4.0
+  open var textFieldHSpace: CGFloat = 4.0 {
+    didSet { repositionViews() }
+  }
   
   /// The space betwen each rows
-  open var VERTICAL_SPACE_BETWEEN_ROWS: CGFloat = 4.0
+  open var rowsSpacing: CGFloat = 4.0 {
+    didSet { repositionViews() }
+  }
   
   /// The minimum space the textfield should be. If the space cannot be allocated, then a new line will be created
-  open var MINIMUM_TEXTFIELD_WIDTH: CGFloat = 10.0
-  
-  open var PADDING_TOP: CGFloat = 10.0
-  open var PADDING_BOTTOM: CGFloat = 10.0
-  open var PADDING_LEFT: CGFloat = 8.0
-  open var PADDING_RIGHT: CGFloat = 16.0
-  open var STANDARD_ROW_HEIGHT: CGFloat = 25.0
-  open var FIELD_MARGIN_X: CGFloat = 4.0
+  open var minimumTextFieldWidth: CGFloat = 10.0 {
+    didSet { repositionViews() }
+  }
+  open var standardRowHeight: CGFloat = 25.0 {
+    didSet { repositionViews() }
+  }
+  open var fieldMarginX: CGFloat = 4.0 {
+    didSet { repositionViews() }
+  }
+  open var padding : UIEdgeInsets = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8) {
+    didSet { repositionViews() }
+  }
   
   /// Minimum height size for the view if empty
-  open var MINIMUM_VIEW_HEIGHT: CGFloat = 45.0
+  open var minHeight: CGFloat = 45.0 {
+    didSet { invalidateIntrinsicContentSize() }
+  }
   
   public convenience init() {
     self.init(mode: .edit)
@@ -190,6 +241,7 @@ open class FA_TokenInputView: UIView {
     self.textField.delegate = self
     self.textField.addTarget(self, action: #selector(FA_TokenInputView.onTextFieldDidChange(_:)), for: .editingChanged)
     self.textField.addTarget(self, action: #selector(FA_TokenInputView.onTextFieldDidEndEditing(_:)), for: .editingDidEnd)
+    self.textField.isUserInteractionEnabled = false
     self.addSubview(self.textField)
     
     self.fieldLabel = UILabel(frame: CGRect.zero)
@@ -198,7 +250,7 @@ open class FA_TokenInputView: UIView {
     self.fieldLabel.isHidden = true
     
     self.backgroundColor = UIColor.clear
-    self.intrinsicContentHeight = self.STANDARD_ROW_HEIGHT
+    self.intrinsicContentHeight = self.standardRowHeight
     
     self.clipsToBounds = true
     self.displayMode = mode
@@ -206,14 +258,16 @@ open class FA_TokenInputView: UIView {
     self.heightZeroConstraint = NSLayoutConstraint(item: self, attribute: .height, relatedBy: .equal, toItem: nil, attribute: .notAnAttribute, multiplier: 1.0, constant: 0.0)
     
     self.repositionViews()
-    self.setDefaultColors()
   }
   
   override open var intrinsicContentSize : CGSize {
-    return CGSize(width: UIView.noIntrinsicMetric, height: max(self.MINIMUM_VIEW_HEIGHT, self.intrinsicContentHeight))
+    return CGSize(width: UIView.noIntrinsicMetric, height: max(self.minHeight, self.intrinsicContentHeight))
   }
-  
-  open func setColors(_ textColor: UIColor, selectedTextColor: UIColor, selectedBackgroundColor: UIColor) {
+  open override func tintColorDidChange() {
+    super.tintColorDidChange()
+    self.setColors(textColor, selectedTextColor: selectedTextColor, selectedBackgroundColor: selectedBackgroundColor)
+  }
+  open func setColors(_ textColor: UIColor?, selectedTextColor: UIColor?, selectedBackgroundColor: UIColor?) {
     
     self.textColor = textColor
     self.selectedTextColor = selectedTextColor
@@ -224,25 +278,25 @@ open class FA_TokenInputView: UIView {
     }
   }
   
-  open func addToken(token theToken: FA_Token) {
-    if self.tokens.contains(theToken) {
+  open func add(_ token: FA_Token) {
+    if self.tokens.contains(token) {
       return
     }
     
-    self.tokens.append(theToken)
-    let tokenView = FA_TokenView(token: theToken, displayMode: self.displayMode)
+    self.tokens.append(token)
+    let tokenView = FA_TokenView(token: token, displayMode: self.displayMode)
     tokenView.font = self.font
     tokenView.delegate = self;
-    tokenView.setColors(theToken.textColor ?? self.textColor,
-                        selectedTextColor: theToken.selectedTextColor ?? self.selectedTextColor,
-                        selectedBackgroundColor: theToken.selectedBackgroundColor ?? self.selectedBackgroundColor)
+    tokenView.setColors(token.textColor ?? self.textColor,
+                        selectedTextColor: token.selectedTextColor ?? self.selectedTextColor,
+                        selectedBackgroundColor: token.selectedBackgroundColor ?? self.selectedBackgroundColor)
     
     let intrinsicSize = tokenView.intrinsicContentSize
     tokenView.frame = CGRect(x: 0, y: 0, width: intrinsicSize.width, height: intrinsicSize.height)
     self.tokenViews.append(tokenView)
     self.addSubview(tokenView)
     self.textField.text = ""
-    self.delegate?.tokenInputViewDidAddToken?(self, token: theToken)
+    self.delegate?.tokenInputView?(self, didAdd: token)
     
     // Clearing text programmatically doesn't call this automatically
     self.onTextFieldDidChange(self.textField)
@@ -269,11 +323,11 @@ open class FA_TokenInputView: UIView {
     let tokenViews = self.tokenViews
     self.tokens = []
     self.tokenViews = []
-
+    
     tokens.forEach {
-      self.delegate?.tokenInputViewDidRemoveToken?(self, token: $0)
+      self.delegate?.tokenInputView?(self, didRemove: $0)
     }
-
+    
     tokenViews.forEach {
       $0.removeFromSuperview()
     }
@@ -281,18 +335,27 @@ open class FA_TokenInputView: UIView {
     self.repositionViews()
   }
   
-  open func removeToken(token theToken: FA_Token) {
-    if let index = self.tokens.index(where: { (token) -> Bool in return token == theToken }) {
+  open func remove(_ token: FA_Token) {
+    if let index = self.tokens.firstIndex(of: token) {
       self.removeTokenAtIndex(index)
     }
   }
+  open func replace(_ previousToken: FA_Token, by newToken: FA_Token) {
+    guard let index = self.tokens.firstIndex(of: previousToken) else {
+      return
+    }
+    UIView.animate(withDuration: CATransaction.animationDuration(), animations: {
+      let tokenView = self.tokenViews[index]
+      tokenView.setColors(newToken.textColor, selectedTextColor: newToken.selectedTextColor, selectedBackgroundColor: newToken.selectedBackgroundColor)
+    })
+  }
   
-  open func setInputAccessoryView(_ view: UIView) {
+  open func setInputAccessoryView(_ view: UIView?) {
     self.textField.inputAccessoryView = view
   }
   
   open func forceTokenizeCurrentText() {
-    let _ = self.tokenizeTextFieldText()
+    self.tokenizeTextFieldText()
   }
   
   fileprivate func removeTokenAtIndex(_ index: Int) {
@@ -300,9 +363,8 @@ open class FA_TokenInputView: UIView {
     tokenView.removeFromSuperview()
     self.tokenViews.remove(at: index)
     
-    let removedToken = self.tokens[index]
-    self.tokens.remove(at: index)
-    self.delegate?.tokenInputViewDidRemoveToken?(self, token: removedToken)
+    let removedToken = self.tokens.remove(at: index)
+    self.delegate?.tokenInputView?(self, didRemove: removedToken)
     
     self.updatePlaceholderTextVisibility()
     self.repositionViews()
@@ -315,36 +377,19 @@ open class FA_TokenInputView: UIView {
     return self.textField
   }
   
-  fileprivate func tokenizeTextFieldText() -> FA_Token? {
-    
-    let text = self.textField.text;
-    if !text!.isEmpty {
-      if let token = self.delegate?.tokenInputViewTokenForText?(self, text: text!) {
-        self.addToken(token: token)
-        self.onTextFieldDidChange(self.textField)
-        return token
-      }
+  @discardableResult fileprivate func tokenizeTextFieldText() -> FA_Token? {
+    guard let text = self.textField.text, !text.isEmpty,
+      let token = self.delegate?.tokenInputView?(self, tokenForText: text) else {
+        return nil
     }
-    
-    return nil
-  }
-  
-  fileprivate func setDefaultColors() {
-    if let tint = self.tintColor {
-      self.textColor = tint
-      self.selectedBackgroundColor = tint
-      self.selectedTextColor = UIColor.white
-      return
-    }
-    
-    self.textColor = UIColor.black
-    self.selectedTextColor = UIColor.white
-    self.selectedBackgroundColor = UIColor.black
+    self.add(token)
+    self.onTextFieldDidChange(self.textField)
+    return token
   }
   
   fileprivate func textFieldDisplayOffset() -> CGFloat {
     // Essentially the textfield's y with PADDING_TOP
-    return self.textField.frame.minY - self.PADDING_TOP
+    return self.textField.frame.minY - self.padding.top
   }
   
   fileprivate func repositionViews() {
@@ -357,40 +402,40 @@ open class FA_TokenInputView: UIView {
     
     self.shouldForceRepositionning = false
     
-    let rightBoundary = bounds.width - self.PADDING_RIGHT
+    let rightBoundary = bounds.width - self.padding.right
     var firstLineRightBoundary = rightBoundary
     
-    var curX = self.PADDING_LEFT
-    var curY = self.PADDING_TOP
+    var curX = self.padding.left
+    var curY = self.padding.top
     var yPositionForLastToken: CGFloat = 0.0
     
     // Position field view (if set)
     if let fieldView = self.fieldView {
       fieldView.sizeToFit()
       var fieldViewRect = fieldView.frame
-      fieldViewRect.origin.x = curX + self.FIELD_MARGIN_X
-      fieldViewRect.origin.y = curY + ((self.STANDARD_ROW_HEIGHT - fieldViewRect.height)/2.0)
+      fieldViewRect.origin.x = curX + self.fieldMarginX
+      fieldViewRect.origin.y = curY + ((self.standardRowHeight - fieldViewRect.height)/2.0)
       fieldView.frame = fieldViewRect
       
-      curX = fieldViewRect.maxX + self.FIELD_MARGIN_X
+      curX = fieldViewRect.maxX + self.fieldMarginX
     }
     
     // Position field label (if field name is set)
     if !self.fieldLabel.isHidden {
       self.fieldLabel.sizeToFit()
       var fieldLabelRect = self.fieldLabel.frame
-      fieldLabelRect.origin.x = curX + self.FIELD_MARGIN_X
-      fieldLabelRect.origin.y = curY + ((self.STANDARD_ROW_HEIGHT-fieldLabelRect.height)/2.0)
+      fieldLabelRect.origin.x = curX + self.fieldMarginX
+      fieldLabelRect.origin.y = curY + ((self.standardRowHeight-fieldLabelRect.height)/2.0)
       self.fieldLabel.frame = fieldLabelRect
       
-      curX = fieldLabelRect.maxX + self.FIELD_MARGIN_X
+      curX = fieldLabelRect.maxX + self.fieldMarginX
     }
     
     // Position accessory view (if set)
     if let accessoryView = self.accessoryView {
       accessoryView.sizeToFit()
       var accessoryRect = accessoryView.frame
-      accessoryRect.origin.x = bounds.width - self.PADDING_RIGHT - accessoryRect.width
+      accessoryRect.origin.x = bounds.width - self.padding.right - accessoryRect.width
       accessoryRect.origin.y = curY
       accessoryView.frame = accessoryRect
       
@@ -412,15 +457,15 @@ open class FA_TokenInputView: UIView {
         // Need a new line
         currentLine += 1
         tokensByLine[currentLine] = 0
-        curX = self.PADDING_LEFT
-        curY += self.STANDARD_ROW_HEIGHT+self.VERTICAL_SPACE_BETWEEN_ROWS
+        curX = self.padding.left
+        curY += self.standardRowHeight+self.rowsSpacing
       }
       
       tokensByLine[currentLine] = tokensByLine[currentLine]! + 1
       
       tokenRect.origin.x = curX
       // Center our tokenView vertially within STANDARD_ROW_HEIGHT
-      tokenRect.origin.y = curY + ((self.STANDARD_ROW_HEIGHT-tokenRect.height)/2.0)
+      tokenRect.origin.y = curY + ((self.standardRowHeight-tokenRect.height)/2.0)
       if tokenRect.width > self.getMaxLineWidth() {
         tokenRect.size.width = self.getMaxLineWidth()
       }
@@ -434,26 +479,22 @@ open class FA_TokenInputView: UIView {
     
     
     // Always indent textfield by a little bit
-    curX += self.TEXT_FIELD_HSPACE
+    curX += self.textFieldHSpace
     let textBoundary = currentLine == 0 ? firstLineRightBoundary : rightBoundary
     var availableWidthForTextField = textBoundary - curX
-    if (availableWidthForTextField < self.MINIMUM_TEXTFIELD_WIDTH) {
-      curX = self.PADDING_LEFT + self.TEXT_FIELD_HSPACE
-      curY += self.STANDARD_ROW_HEIGHT+self.VERTICAL_SPACE_BETWEEN_ROWS
+    if (availableWidthForTextField < self.minimumTextFieldWidth) {
+      curX = self.padding.left + self.textFieldHSpace
+      curY += self.standardRowHeight+self.rowsSpacing
       // Adjust the width
       availableWidthForTextField = rightBoundary - curX
     }
     
     if (!self.editing && curY > yPositionForLastToken && !self.tokens.isEmpty) {
       // check if there is another token on the line and if not we should remove the line height
-      curY -= self.STANDARD_ROW_HEIGHT+self.VERTICAL_SPACE_BETWEEN_ROWS
+      curY -= self.standardRowHeight+self.rowsSpacing
     }
     
-    if self.editing {
-      self.textField.frame = CGRect(x: curX, y: curY, width: availableWidthForTextField, height: self.STANDARD_ROW_HEIGHT)
-    } else {
-      self.textField.frame = CGRect.zero
-    }
+    self.textField.frame = CGRect(x: curX, y: curY, width: availableWidthForTextField, height: self.standardRowHeight)
     
     if self.displayMode == .view {
       self.textField.frame = CGRect.zero
@@ -464,26 +505,26 @@ open class FA_TokenInputView: UIView {
     self.invalidateIntrinsicContentSize()
     
     if (oldContentHeight != self.intrinsicContentHeight) {
-      self.delegate?.tokenInputViewDidChangeHeight?(self, height: self.intrinsicContentSize.height)
+      self.delegate?.tokenInputView?(self, didChangeHeightTo: self.intrinsicContentSize.height)
     }
     self.setNeedsDisplay()
     
   }
   
   fileprivate func getMaxLineWidth() -> CGFloat {
-    return self.frame.width - self.PADDING_RIGHT - self.PADDING_LEFT
+    return self.frame.width - self.padding.right - self.padding.left
   }
   
   fileprivate func getIntrinsincContentHeightAfterReposition() -> CGFloat {
     if self.editing {
-      return self.textField.frame.maxY+self.PADDING_BOTTOM
+      return self.textField.frame.maxY+self.padding.bottom
     }
     
     guard let view = self.tokenViews.last else {
       return 0
     }
     
-    return view.frame.maxY+self.PADDING_BOTTOM
+    return view.frame.maxY+self.padding.bottom
   }
   
   fileprivate func repositionViewZeroHeight() {
@@ -521,7 +562,7 @@ open class FA_TokenInputView: UIView {
   }
   
   @objc func onTextFieldDidChange(_ textfield: UITextField) {
-    self.delegate?.tokenInputViewDidChangeText?(self, text: textfield.text!)
+    delegate?.tokenInputView?(self, didChangeText: textField.text)
   }
   
   @objc func onTextFieldDidEndEditing(_ textfield: UITextField) {
@@ -529,7 +570,7 @@ open class FA_TokenInputView: UIView {
   }
   
   @objc func viewWasTapped() {
-    self.unselectAllTokenViewsAnimated(true)
+    self.unselectAllTokenViewsAnimated()
     if self.displayMode == .view {
       return
     }
@@ -539,18 +580,18 @@ open class FA_TokenInputView: UIView {
 
 // MARK: - Token Selection
 extension FA_TokenInputView {
-  func selectTokenView(tokenView theView: FA_TokenView, animated: Bool) {
-    theView.setSelected(selected: true, animated: animated)
+  func selectTokenView(tokenView theView: FA_TokenView) {
+    theView.selected = true
     for view in self.tokenViews {
       if view != theView {
-        view.setSelected(selected: false, animated: animated)
+        view.selected = false
       }
     }
   }
   
-  func unselectAllTokenViewsAnimated(_ animated: Bool) {
+  func unselectAllTokenViewsAnimated() {
     for view in self.tokenViews {
-      view.setSelected(selected: false, animated: animated)
+      view.selected = false
     }
   }
 }
@@ -563,14 +604,18 @@ extension FA_TokenInputView {
     if self.displayMode == .view {
       return
     }
+    self.textField.isUserInteractionEnabled = true
     self.textField.becomeFirstResponder()
-    self.unselectAllTokenViewsAnimated(false)
-    self.repositionViews()
+    UIView.performWithoutAnimation {
+      self.unselectAllTokenViewsAnimated()
+      self.repositionViews()
+    }
   }
   
   public func endEditing() {
     self.resignFirstResponder()
     self.repositionViews()
+    self.textField.isUserInteractionEnabled = false
   }
 }
 
@@ -580,22 +625,30 @@ extension FA_TokenInputView: UITextFieldDelegate  {
   public func textFieldDidBeginEditing(_ textField: UITextField) {
     self.accessoryView?.isHidden = false
     self.delegate?.tokenInputViewDidBeginEditing?(self)
-    self.unselectAllTokenViewsAnimated(true)
+    self.unselectAllTokenViewsAnimated()
   }
   
   public func textFieldDidEndEditing(_ textField: UITextField) {
     self.accessoryView?.isHidden = true
-    self.delegate?.tokenInputViewDidEnditing?(self)
-    if (self.tokenizeOnEndEditing) {
-      let _ = self.tokenizeTextFieldText()
+    self.delegate?.tokenInputViewDidEndEditing?(self)
+    if self.tokenizeOnEndEditing {
+      self.tokenizeTextFieldText()
     }
   }
   
   public func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-    let _ = self.tokenizeTextFieldText()
+    self.tokenizeTextFieldText()
     return false
   }
   
+  public func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+    if !string.isEmpty && tokenizationCharacters.contains(string) {
+      tokenizeTextFieldText()
+      // Never allow the change if it matches at token
+      return false
+    }
+    return true
+  }
 }
 
 // MARK: - TextField customazation
@@ -733,7 +786,7 @@ extension FA_TokenInputView {
 // MARK: - FA_TokenViewDelegate
 extension FA_TokenInputView: FA_TokenViewDelegate {
   func tokenViewWasTapped(_ tokenView: FA_TokenView) {
-    self.delegate?.tokenInputViewWasClicked?(self, token: tokenView.token)
+    self.delegate?.tokenInputView?(self, didSelect: tokenView.token)
   }
   
   func tokenViewDidRequestDelete(_ tokenView: FA_TokenView, replaceWithText theText: String?) {
@@ -752,7 +805,10 @@ extension FA_TokenInputView: FA_TokenViewDelegate {
   }
   
   func tokenViewDidRequestSelection(_ tokenView: FA_TokenView) {
-    self.selectTokenView(tokenView: tokenView, animated: true)
+    if self.delegate?.tokenInputView?(self, canSelect: tokenView.token) ?? true {
+      self.selectTokenView(tokenView: tokenView)
+      self.delegate?.tokenInputView?(self, didSelect: tokenView.token)
+    }
   }
   
   func tokenViewShouldDisplayMenu(_ tokenView: FA_TokenView) -> Bool {
@@ -761,7 +817,7 @@ extension FA_TokenInputView: FA_TokenViewDelegate {
   }
   
   func tokenViewMenuItems(_ tokenView: FA_TokenView) -> [UIMenuItem] {
-    guard let items = self.delegate?.tokenInputViewMenuItems?(self, token: tokenView.token) else { return [] }
+    guard let items = self.delegate?.tokenInputView?(self, menuItemsFor: tokenView.token) else { return [] }
     return items
   }
 }
@@ -776,10 +832,48 @@ extension FA_TokenInputView: FA_BackspaceDetectingTextFieldDelegate {
       if textField.text?.isEmpty ?? true {
         
         if let tokenView = self.tokenViews.last {
-          self.selectTokenView(tokenView: tokenView, animated: true)
+          self.selectTokenView(tokenView: tokenView)
           self.textField.resignFirstResponder()
         }
       }
     })
+  }
+}
+
+//MARK: Deprecations
+extension FA_TokenInputView {
+  @available(*, deprecated, renamed: "minHeight")
+  open var MINIMUM_VIEW_HEIGHT: CGFloat { get { return minHeight } set { minHeight = newValue }}
+  @available(*, deprecated, message: "use padding.top instead")
+  open var PADDING_TOP: CGFloat { get { return padding.top } set { padding.top = newValue }}
+  @available(*, deprecated, message: "use padding.bottom instead")
+  open var PADDING_BOTTOM: CGFloat { get { return padding.bottom } set { padding.bottom = newValue }}
+  @available(*, deprecated, message: "use padding.left instead")
+  open var PADDING_LEFT: CGFloat { get { return padding.left } set { padding.left = newValue }}
+  @available(*, deprecated, message: "use padding.right instead")
+  open var PADDING_RIGHT: CGFloat { get { return padding.right } set { padding.right = newValue }}
+  
+  @available(*, deprecated, renamed: "minimumTextFieldWidth")
+  open var MINIMUM_TEXTFIELD_WIDTH: CGFloat { get { return minimumTextFieldWidth } set { minimumTextFieldWidth = newValue } }
+  
+  @available(*, deprecated, renamed: "standardRowHeight")
+  open var STANDARD_ROW_HEIGHT: CGFloat { get { return standardRowHeight} set { standardRowHeight = newValue }}
+  
+  @available(*, deprecated, renamed: "rowsSpacing")
+  open var VERTICAL_SPACE_BETWEEN_ROWS: CGFloat { get { return rowsSpacing } set { rowsSpacing = newValue }}
+  
+  @available(*, deprecated, renamed: "fieldMarginX")
+  open var FIELD_MARGIN_X: CGFloat { get { return fieldMarginX } set { fieldMarginX = newValue }}
+  
+  @available(*, deprecated, renamed: "textFieldHSpace")
+  open var TEXT_FIELD_HSPACE: CGFloat { get { return textFieldHSpace } set { textFieldHSpace = newValue }}
+  
+  @available(*, deprecated, renamed: "add(_:)")
+  open func addToken(token theToken: FA_Token) {
+    add(theToken)
+  }
+  @available(*, deprecated, renamed: "remove(_:)")
+  open func remove(token theToken: FA_Token) {
+    remove(theToken)
   }
 }
