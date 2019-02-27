@@ -125,6 +125,7 @@ open class FA_TokenInputView: UIView {
   open var allTokens: [FA_Token] {
     return self.tokens.map { $0 }
   }
+  open var tokenEquivalence : ((FA_Token, FA_Token)->Bool) = { return $0.displayText == $1.displayText }
   
   open var shouldForceRepositionning = false
   
@@ -336,17 +337,21 @@ open class FA_TokenInputView: UIView {
   }
   
   open func remove(_ token: FA_Token) {
-    if let index = self.tokens.firstIndex(of: token) {
+    if let index = self.tokens.firstIndex(where: {self.tokenEquivalence($0, token)} ) {
       self.removeTokenAtIndex(index)
     }
   }
   open func replace(_ previousToken: FA_Token, by newToken: FA_Token) {
-    guard let index = self.tokens.firstIndex(of: previousToken) else {
+    guard let index = self.tokens.firstIndex(where: {self.tokenEquivalence($0, previousToken)} ) else {
       return
     }
     UIView.animate(withDuration: CATransaction.animationDuration(), animations: {
       let tokenView = self.tokenViews[index]
+      tokenView.token = newToken
       tokenView.setColors(newToken.textColor, selectedTextColor: newToken.selectedTextColor, selectedBackgroundColor: newToken.selectedBackgroundColor)
+      tokenView.sizeToFit()
+      self.repositionViews()
+      self.layoutIfNeeded()
     })
   }
   

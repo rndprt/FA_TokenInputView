@@ -18,8 +18,10 @@ protocol FA_TokenViewDelegate: class {
 
 class FA_TokenView: UIView {
   
-  var token: FA_Token!
-  var displayText: String
+  var token: FA_Token! {
+    didSet { self.updateLabels() }
+  }
+  var displayText: String { return token.displayText }
   var autocorrectionType: UITextAutocorrectionType = .no
   var displayMode: FA_TokenInputViewMode = .view
   
@@ -71,15 +73,13 @@ class FA_TokenView: UIView {
   }
   
   init(token theToken: FA_Token, displayMode: FA_TokenInputViewMode = .edit) {
-    self.displayText = theToken.displayText
-    
     super.init(frame: CGRect.zero)
-    
+
+    self.token = theToken
+
     self.displayMode = displayMode
     self.separatorColor = UIColor.lightGray
-    self.selectedTextColor = UIColor.white
     
-    self.token = theToken
     var tintColor = UIColor(red: 0.0823, green: 0.4941, blue: 0.9843, alpha: 1.0)
     if let tint = self.tintColor {
       tintColor = tint
@@ -101,27 +101,13 @@ class FA_TokenView: UIView {
     self.selectedLabel.isHidden = true
     self.addSubview(self.selectedLabel)
     
-    
-    // Configure for the token, unselected shows "[displayText]," and selected is "[displayText]"
-    let labelString = "\(self.displayText),"
-    let attrString = NSMutableAttributedString(string: labelString, attributes: [
-      .font : self.label.font,
-      .foregroundColor : UIColor.lightGray
-      ])
-    let tintRange = (labelString as NSString).range(of: self.displayText)
-    
-    // Make the name part the system tint color
-    attrString.setAttributes([.foregroundColor : tintColor], range: tintRange)
-    
-    self.label.attributedText = attrString
-    self.selectedLabel.text = self.displayText
-    
     // Listen for taps
     let tapGesture = UITapGestureRecognizer(target: self, action: #selector(FA_TokenView.handleTapGestureRecognizer(_:)))
     let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(FA_TokenView.handleLongPressGestureRecognizer(_:)))
     longPressGesture.minimumPressDuration = 0.5
     tapGesture.require(toFail: longPressGesture)
     
+    self.updateLabels()
     self.addGestureRecognizer(tapGesture)
     self.addGestureRecognizer(longPressGesture)
     self.setNeedsLayout()
@@ -150,7 +136,6 @@ class FA_TokenView: UIView {
   }
   
   func setSeparatorVisibility(_ visible: Bool) {
-    self.displayText = self.token.displayText
     let labelString = "\(self.displayText),"
     let attrString = NSMutableAttributedString(string: labelString, attributes: [
       .font : self.label.font,
@@ -186,6 +171,23 @@ class FA_TokenView: UIView {
     if let attrString = attrString as? NSAttributedString {
       self.label.attributedText = attrString
     }
+  }
+  
+  func updateLabels() {
+    // Configure for the token, unselected shows "[displayText]," and selected is "[displayText]"
+    let labelString = "\(self.displayText),"
+    let attrString = NSMutableAttributedString(string: labelString, attributes: [
+      .font : self.label.font,
+      .foregroundColor : UIColor.lightGray
+      ])
+    let tintRange = (labelString as NSString).range(of: self.displayText)
+    
+    // Make the name part the system tint color
+    attrString.setAttributes([.foregroundColor : tintColor], range: tintRange)
+    
+    self.label.attributedText = attrString
+    self.selectedLabel.text = self.displayText
+    self.invalidateIntrinsicContentSize()
   }
   
   @objc func handleTapGestureRecognizer(_ recognizer: UITapGestureRecognizer) {
